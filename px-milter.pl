@@ -15,12 +15,14 @@ BEGIN {
 use strict;
 use Fcntl;
 use threads;
+use Sakia::Net::MailParser;
 use Sendmail::PMilter qw(:all);
 ################################################################################
 my $DEBUG = 0;
 my $PRINT = 1;
 my $PORT  = 10025;
 my $MODE;
+my $MAX_BODY = 1024*1024;	# 1MB
 
 my $USER_FILTER         = $0 =~ s|^.*/([\w\-\.]+)\.\w+$|$1.user-filter.pm|r;
 my $USER_FILTER_PACKAGE = 'px_filter';
@@ -41,12 +43,16 @@ my $TEST_FILE;
 		if ($x eq '-s') { $PRINT = 0; next; }
 		if ($x eq '-h') { $HELP  = 1; next; }
 
-		if ($x eq '-a')  { $MODE = ''; next; }
-		if ($x eq '-r')  { $MODE = SMFIS_REJECT;  next; }
-		if ($x eq '-di') { $MODE = SMFIS_DISCARD; next; }
+		if ($x eq '-add')     { $MODE = ''; next; }
+		if ($x eq '-reject')  { $MODE = SMFIS_REJECT;  next; }
+		if ($x eq '-discard') { $MODE = SMFIS_DISCARD; next; }
 
 		if ($x eq '-p') {
 			$PORT = int(shift(@ARGV));
+			next;
+		}
+		if ($x eq '-m') {
+			$MAX_BODY = int(shift(@ARGV) * 1024*1024);
 			next;
 		}
 		if ($x eq '-t') {
@@ -63,14 +69,15 @@ Usage: $0 [options]
 Available options are:
   -p port	bind port number (default: 10025)
   -t file.eml	milter test mode
+  -m size	maximum email size to analyze [MB] (default: 1)
   -s		silent mode
   -d		debug mode
   -h		view this help
 
 [Run modes]
-  -a		Add "$DETECT_HEADER: yes (reason)" to header (default)
-  -r		REJECT  mode
-  -di		DISCARD mode
+  -add		Add "$DETECT_HEADER: yes (reason)" to header (default)
+  -reject	REJECT  mode
+  -discard	DISCARD mode
 HELP
 		exit;
 	}
@@ -95,6 +102,27 @@ if (!-e $USER_FILTER) {
 }
 &load_user_filter();
 
+my $parser = new Sakia::Net::MailParser({});
+
+#-------------------------------------------------------------------------------
+# Patch to Sendmail::PMilter::Context
+#-------------------------------------------------------------------------------
+# To improve throughput.
+#
+if (1) {
+	require Sendmail::PMilter::Context;
+	*Sendmail::PMilter::Context::write_packet
+	= sub {
+		my $this = shift;
+		my $code = shift;
+		my $out  = shift // '';
+		my $len  = pack('N', length($out) + 1);
+
+		$this->{socket}->syswrite($len . $code . $out);
+		return $len;
+	};
+}
+
 #-------------------------------------------------------------------------------
 # Regist callback
 #-------------------------------------------------------------------------------
@@ -108,8 +136,7 @@ my $env_from;
 my $rcpt_to;
 my $msg_id;
 my %header;
-
-my $parser = new MailParser;
+my $body = '';
 
 $cb{helo} = sub {
 	my $ctx = shift;
@@ -148,8 +175,11 @@ $cb{envrcpt} = sub {
 };
 $cb{header} = sub {
 	my $ctx = shift;
-	my $key = shift =~ tr/A-Z/a-z/r;
+	my $key = shift;
 	my $val = $parser->decode_header_line(shift, 'utf8');
+
+	$body .= "$key: $val\r\n";
+	$key   =~ tr/A-Z/a-z/;
 
 	if ($key eq 'message-id') {	# = <0123456789@domain.example.com>
 		$val =~ s/[^\w\-\.\@]//g;
@@ -159,6 +189,26 @@ $cb{header} = sub {
 	if (!exists($header{$key})) {
 		$header{$key} = $val;
 	}
+
+	return SMFIS_CONTINUE;
+};
+
+$cb{eoh} = sub {
+	my $ctx = shift;
+	$body .= "\r\n";
+
+	return SMFIS_CONTINUE;
+};
+
+$cb{body} = sub {
+	my $ctx = shift;
+	my $add = shift;
+	my $len = shift;
+
+	if (length($body) < $MAX_BODY) {
+		$body .= $add;
+	}
+
 	return SMFIS_CONTINUE;
 };
 
@@ -182,6 +232,28 @@ $cb{eom} = sub {
 	$DEBUG && print "To name:   $to_name\n";
 	$DEBUG && print "From name: $from_name\n";
 
+	# use Sakia::Net::MailParser.pm
+	my $mail = $parser->parse("$body\n", 'utf8');
+	if ($mail->{html} && $mail->{html_charset}) {
+		Encode::from_to($mail->{html}, $mail->{html_charset}, 'utf8');
+		$mail->{html_charset} = 'utf8';
+	}
+
+	if ($DEBUG) {
+		if ($mail->{body}) {
+			print "[text]\n$mail->{body}";
+		}
+		if ($mail->{html}) {
+			print "[html]\n$mail->{html}";
+		}
+		foreach(@{$mail->{attaches}}) {
+			print "attach: \"$_->{filename}\" $_->{type} $_->{size} bytes\n";
+		}
+	}
+
+	#-------------------------------------------------------------
+	# call user filter
+	#-------------------------------------------------------------
 	my $filter = &load_filter_function();
 	if (!$filter) {
 		&log("<$msg_id> Accept (filter load failed)");
@@ -197,7 +269,11 @@ $cb{eom} = sub {
 		msg_id  => $msg_id,
 		to_name => $to_name,
 		from_name=>$from_name,
-		header	=> \%header
+
+		header	=> \%header,
+		body	=> $mail->{body},
+		html	=> $mail->{html},
+		attaches=> $mail->{attaches}
 	});
 
 	if (!$r) {
@@ -205,9 +281,9 @@ $cb{eom} = sub {
 		return SMFIS_CONTINUE;	# Accept
 	}
 
-	#------------------------------------------
+	#-------------------------------------------------------------
 	# detect SPAM
-	#------------------------------------------
+	#-------------------------------------------------------------
 	if ($reason eq '') { $reason = 'no reason'; }
 
 	&log("<$msg_id> is SPAM ($reason)");
@@ -245,15 +321,13 @@ else {
 	my @header;
 	while(@$lines) {
 		my $x = shift(@$lines);
-		if ($x =~ /^\r?\n/) { last; }
+		if ($x =~ /^\r?\n$/) { last; }
 
 		while(@$lines && $lines->[0] =~ /^[\t ]+/) {
 			$x .= shift(@$lines);
 		}
 		push(@header, $x);
 	}
-	my @data = @$lines;
-	undef @$lines;
 
 	my %helo_c = (
 		daemon_addr => '192.168.0.10',
@@ -299,12 +373,16 @@ else {
 		my $r = &$func(\%ctx, @_);
 		if ($r == SMFIS_CONTINUE) { return; }
 
-		if ($r == SMFIS_REJECT)   { print "REJECT\n";   }
-		if ($r == SMFIS_DISCARD)  { print "DISCARD\n";  }
-		if ($r == SMFIS_ACCEPT)   { print "ACCEPT\n";   }
-		if ($r == SMFIS_TEMPFAIL) { print "TEMPFAIL\n"; }
-		if ($r == SMFIS_MSG_LOOP) { print "MSG_LOOP\n"; }
-		if ($r == SMFIS_ALL_OPTS) { print "ALL_OPTS\n"; }
+		print "[$type] ";
+		   if ($r == SMFIS_REJECT)   { print "REJECT\n";   }
+		elsif ($r == SMFIS_DISCARD)  { print "DISCARD\n";  }
+		elsif ($r == SMFIS_ACCEPT)   { print "ACCEPT\n";   }
+		elsif ($r == SMFIS_TEMPFAIL) { print "TEMPFAIL\n"; }
+		elsif ($r == SMFIS_MSG_LOOP) { print "MSG_LOOP\n"; }
+		elsif ($r == SMFIS_ALL_OPTS) { print "ALL_OPTS\n"; }
+		else {
+			print "UNKOWN: $r\n";
+		}
 		exit($r);
 	}
 
@@ -321,6 +399,15 @@ else {
 		&callback('header', split(/:\s*/, $_, 2));
 	}
 	&callback('eoh');
+
+	my $CHUNK = 64*1024;
+	my $data  = join('', @$lines);
+	while($data ne '') {
+		my $buf = substr($data,      0, $CHUNK);
+		$data   = substr($data, $CHUNK);
+
+		&callback('body', $buf, length($buf));
+	}
 	&callback('eom');
 
 	print "ACCEPT\n";
@@ -472,77 +559,4 @@ sub fread_lines {
 	close($fh);
 
 	return \@lines;
-}
-
-################################################################################
-# mail parser routine
-################################################################################
-package MailParser;
-use Encode;
-use MIME::Base64;
-#-------------------------------------------------------------------------------
-sub new {
-	my $class= shift;
-	return bless({}, $class);
-}
-#-------------------------------------------------------------------------------
-# decode for one line
-#-------------------------------------------------------------------------------
-sub decode_header_line {
-	my $self = shift;
-	my $line = shift;
-	my $code = shift;
-	my $ROBJ = $self->{ROBJ};
-
-	if ($line !~ /=\?.*\?=/) { return $line; }
-	$line =~ s/\x00//g;
-
-	# MIME
-	my @buf;
-	$line =~ s/=\?([\w\-]*)\?[Bb]\?([A-Za-z0-9\+\/=]*)\?=/
-		my $mime_code = $1;
-		my $str = decode_base64($2);
-		Encode::from_to($str, $mime_code, $code);
-		push(@buf, $str);
-		"\x00$#buf\x00";
-	/eg;
-
-	# Quoted-Printable
-	$line =~ s!=\?([\w\-]*)\?[Qq]\?((?:=[0-9A-Fa-f][0-9A-Fa-f]|[^=]+)*)\?=!
-		my $mime_code = $1;
-		my $str = $2;
-		$str =~ s/=([0-9A-Fa-f][0-9A-Fa-f])/chr(hex($1))/eg;
-		Encode::from_to($str, $mime_code, $code);
-		push(@buf, $str);
-		"\x00$#buf\x00";
-	!eg;
-
-	$line =~ s/\x00\s+\x00/\x00\x00/g;	# RFC 2047
-	$line =~ s/\x00(\d+)\x00/$buf[$1]/g;	# recovery buffer
-	return $line;
-}
-
-sub decode_rfc3676 {		# RFC2231
-	my $self = shift;
-	my $text = shift;
-	my $type = shift;
-
-	if ($type !~ m|text/plain|i || $type !~ /format=flowed/i) {
-		return $text;
-	}
-	$text =~ s/(^|\n) /$1/g;
-	if ($type =~ /delsp=yes/i) {
-		$text =~ s/ \r?\n//g;
-	} else {
-		$text =~ s/ \r?\n/ /g;
-	}
-	return $text;
-}
-
-sub decode_quoted_printable {	# Content-Transfer-Encoding: quoted-printable
-	my $self = shift;
-	my $text = shift;
-	$text =~ s/=([0-9A-Fa-f][0-9A-Fa-f])/chr(hex($1))/eg;
-	$text =~ s/=\r?\n//sg;
-	return $text;
 }

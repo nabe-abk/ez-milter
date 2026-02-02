@@ -28,7 +28,10 @@ sub main {
 	my $msg_id   = $arg->{msg_id};
 	my $to_name  = $arg->{to_name};
 	my $from_name= $arg->{from_name};
-	my $header   = $arg->{header};	# hash ref
+	my $header   = $arg->{header};		# hash ref
+	my $body     = $arg->{body};
+	my $html     = $arg->{html};
+	my $attaches = $arg->{attaches};	# array ref
 
 	if (! $USER{$rcpt_to}) {
 		return $ACCEPT;

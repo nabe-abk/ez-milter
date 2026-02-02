@@ -13,7 +13,8 @@
 !/milter_start.sh.sample
 
 #--------------------------------------
-# Sendmail::PMilter
+# Library
 #--------------------------------------
+!/Sakia/
 !/Sendmail/
 

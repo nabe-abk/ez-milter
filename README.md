@@ -13,8 +13,8 @@ You can create email filters with just a little perl code.
 ----------------------------------------------------------------------
 [Japanese]
 
-このソフトは、Postfix または Sendmail（動作未確認）で動く、ルールベースのSPAMフィルターの雛形です。
-簡単な Perl のコードを書くだけで、自分思う通りの SPAM フィルタを実装することができます。
+このソフトは、Postfix または Sendmail（動作未確認）で動く、ルールベースのSPAMフィルターです。
+簡単な Perl のコードを書くだけで、自分思う通りの SPAM フィルターを実装することができます。
 
 # 動作環境
 
