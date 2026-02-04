@@ -154,7 +154,6 @@ my $c_ip;
 my $c_host;
 my $env_from;
 my $rcpt_to;
-my $msg_id;
 my %header;
 my $body = '';
 
@@ -194,7 +193,7 @@ $cb{helo} = sub {
 };
 $cb{envfrom} = sub {
 	my $ctx   = shift;
-	$env_from = shift =~ s/^<(.*)>$/$1/r;;
+	$env_from = shift =~ s/^<(.*)>$/$1/r;
 	$DEBUG && print "MAIL FROM: $env_from\n";
 	return SMFIS_CONTINUE;
 };
@@ -212,11 +211,6 @@ $cb{header} = sub {
 	$body .= "$key: $val\r\n";
 	$key   =~ tr/A-Z/a-z/;
 
-	if ($key eq 'message-id') {	# = <0123456789@domain.example.com>
-		$val =~ s/[^\w\-\.\@]//g;
-		$msg_id = $val;
-		$DEBUG && print "$key: $msg_id\n";
-	}
 	if (!exists($header{$key})) {
 		$header{$key} = $val;
 	}
@@ -249,13 +243,15 @@ $cb{body} = sub {
 #-------------------------------------------------------------------------------
 # Judgement
 #-------------------------------------------------------------------------------
-sub add_detect_header {
+my $log_head;
+sub add_header {
 	my $ctx = shift;
+	my $key = shift;
 	my $val = shift;
-	&log("<$msg_id> Add \"$DETECT_HEADER: $val\"");
+	&log("$log_head Add \"$key: $val\"");
 
 	if (ref($ctx) eq 'Sendmail::PMilter::Context') {
-		$ctx->addheader($DETECT_HEADER, $val);
+		$ctx->addheader($key, $val);
 	}
 }
 
@@ -267,6 +263,8 @@ $cb{eom} = sub {
 	$from_name =~ s/^"([^"]*)"$/$1/;		#
 	$DEBUG && print "To name:   $to_name\n";
 	$DEBUG && print "From name: $from_name\n";
+
+	$log_head = "from=<$env_from>";
 
 	# use Sakia::Net::MailParser.pm
 	my $mail = $parser->parse("$body\n", 'utf8');
@@ -292,7 +290,7 @@ $cb{eom} = sub {
 	#-------------------------------------------------------------
 	my $filter = &load_filter_function();
 	if (!$filter) {
-		&log("<$msg_id> Accept (filter load failed)");
+		&log("$log_head Accept (filter load failed)");
 		return SMFIS_CONTINUE;	# if error continue
 	}
 	my $arg = new arg_service({
@@ -302,7 +300,6 @@ $cb{eom} = sub {
 		c_host	=> $c_host,
 		env_from=> $env_from,
 		rcpt_to	=> $rcpt_to,
-		msg_id  => $msg_id,
 		to_name => $to_name,
 		from_name=>$from_name,
 
@@ -314,7 +311,7 @@ $cb{eom} = sub {
 
 	my ($r, $reason, @reply) = &$filter($arg);
 	if ($r == $ACCEPT) {
-		&add_detect_header($ctx, "no");
+		&add_header($ctx, $DETECT_HEADER, "no");
 		return SMFIS_CONTINUE;	# Accept
 	}
 
@@ -326,11 +323,11 @@ $cb{eom} = sub {
 	my $res = ($r == $IS_SPAM) ? ($MODE // $ADD_HEADER) : $r;
 
 	if ($res == $ADD_HEADER) {
-		&add_detect_header($ctx, "yes ($reason)");
+		&add_header($ctx, $DETECT_HEADER, "yes ($reason)");
 		return SMFIS_CONTINUE;
 	}
 
-	&log("<$msg_id> " . &get_smfis_code_name($res) . " ($reason)");
+	&log("$log_head " . &get_smfis_code_name($res) . " ($reason)");
 
 	if ($res == SMFIS_REJECT && @reply) {
 		if (ref($ctx) eq 'Sendmail::PMilter::Context') {
@@ -420,7 +417,7 @@ else {
 		my $r = &$func(\%ctx, @_);
 		if ($r == SMFIS_CONTINUE) { return; }
 
-		print "[$type] " . &get_smfis_code_name($r) . "\n";
+		print &get_smfis_code_name($r) . "\n";
 		exit($r);
 	}
 
@@ -642,11 +639,5 @@ sub add_header {
 	my $arg = shift;
 	my $key = shift;
 	my $val = shift;
-	my $ctx = $arg->{ctx};
-
-	&main::log("<$msg_id> Add \"$key: $val\"");
-
-	if (ref($ctx) eq 'Sendmail::PMilter::Context') {
-		$ctx->addheader($key, $val);
-	}
+	&main::add_header($arg->{ctx}, $key, $val);
 }

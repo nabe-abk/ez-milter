@@ -30,7 +30,6 @@ sub main {
 	my $c_host   = $arg->{c_host};
 	my $env_from = $arg->{env_from};
 	my $rcpt_to  = $arg->{rcpt_to};
-	my $msg_id   = $arg->{msg_id};
 	my $to_name  = $arg->{to_name};
 	my $from_name= $arg->{from_name};
 	my $header   = $arg->{header};		# hash ref
