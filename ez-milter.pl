@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #-------------------------------------------------------------------------------
-my $LastUpdate = '2026.02.03';
+my $LastUpdate = '2026.02.04';
 ################################################################################
 # EZ-Milter - Easy SPAM Mail Filter	   (C)2026 nabe@abk
 #	https://github.com/nabe-abk/ez-milter/
@@ -38,6 +38,11 @@ my $DETECT_HEADER = 'X-EZ-Spam-Detect';
 my $SMFIP_SKIP = 0x00000400;
 my $SMFIR_SKIP = 's';
 my $SMFIP      = 0;		# Negociated milter protocol flags
+
+# Load from user_filter in load_user_filter()
+my $ACCEPT;
+my $IS_SPAM;
+my $ADD_HEADER;
 #-------------------------------------------------------------------------------
 # command line options
 #-------------------------------------------------------------------------------
@@ -308,10 +313,6 @@ $cb{eom} = sub {
 	});
 
 	my ($r, $reason, @reply) = &$filter($arg);
-	my $ACCEPT	= ez_filter::ACCEPT();		# load constant
-	my $IS_SPAM	= ez_filter::IS_SPAM();		#
-	my $ADD_HEADER	= ez_filter::ADD_HEADER();	#
-
 	if ($r == $ACCEPT) {
 		&add_detect_header($ctx, "no");
 		return SMFIS_CONTINUE;	# Accept
@@ -541,6 +542,13 @@ sub load_user_filter {
 		$user_filter_size      = $size;
 		$user_filter_timestamp = $mod;
 		&log("User filter ${re}load: last modified=" . &get_timestamp($mod) . " / size=$size");
+	}
+	{
+		# Load constants
+		no strict 'refs';
+		$ACCEPT     = &{$USER_FILTER_PACKAGE . '::ACCEPT'    }();
+		$IS_SPAM    = &{$USER_FILTER_PACKAGE . '::IS_SPAM'   }();
+		$ADD_HEADER = &{$USER_FILTER_PACKAGE . '::ADD_HEADER'}();
 	}
 }
 
