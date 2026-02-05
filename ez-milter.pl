@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #-------------------------------------------------------------------------------
-my $LastUpdate = '2026.02.04';
+my $LastUpdate = '2026.02.05';
 ################################################################################
 # EZ-Milter - Easy SPAM Mail Filter	   (C)2026 nabe@abk
 #	https://github.com/nabe-abk/ez-milter/
@@ -41,6 +41,7 @@ my $SMFIP      = 0;		# Negociated milter protocol flags
 
 # Load from user_filter in load_user_filter()
 my $ACCEPT;
+my $NO_CHECK;
 my $IS_SPAM;
 my $ADD_HEADER;
 #-------------------------------------------------------------------------------
@@ -73,12 +74,16 @@ my $TEST_FILE;
 			$TEST_FILE = shift(@ARGV);
 			next;
 		}
+		if ($x =~ /.+\.eml$/i) {
+			$TEST_FILE = $x;
+			next;
+		}
 		push(@ary, $x);
 	}
 
 	if ($HELP) {
 		print STDERR <<HELP;	## safe
-Usage: $0 [options]
+Usage: $0 [options] [test-file.eml]
 
 Available options are:
   -p port	bind port number (default: 10025)
@@ -243,7 +248,7 @@ $cb{body} = sub {
 };
 
 #-------------------------------------------------------------------------------
-# Judgement
+# call user filter
 #-------------------------------------------------------------------------------
 my $log_head;
 sub add_header {
@@ -316,6 +321,10 @@ $cb{eom} = sub {
 		&add_header($ctx, $DETECT_HEADER, "no");
 		return SMFIS_CONTINUE;	# Accept
 	}
+	if ($r == $NO_CHECK) {
+		&add_header($ctx, $DETECT_HEADER, "no check");
+		return SMFIS_CONTINUE;	# Accept
+	}
 
 	#-------------------------------------------------------------
 	# detect SPAM
@@ -326,7 +335,7 @@ $cb{eom} = sub {
 
 	if ($res == $ADD_HEADER) {
 		&add_header($ctx, $DETECT_HEADER, "yes ($reason)");
-		return SMFIS_CONTINUE;
+		return SMFIS_CONTINUE;	# Accept
 	}
 
 	&log("$log_head " . &get_smfis_code_name($res) . " ($reason)");
@@ -546,6 +555,7 @@ sub load_user_filter {
 		# Load constants
 		no strict 'refs';
 		$ACCEPT     = &{$USER_FILTER_PACKAGE . '::ACCEPT'    }();
+		$NO_CHECK   = &{$USER_FILTER_PACKAGE . '::NO_CHECK'  }();
 		$IS_SPAM    = &{$USER_FILTER_PACKAGE . '::IS_SPAM'   }();
 		$ADD_HEADER = &{$USER_FILTER_PACKAGE . '::ADD_HEADER'}();
 	}
