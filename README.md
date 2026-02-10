@@ -34,6 +34,12 @@ smtp      inet  n       -       y       -       -       smtpd
 service postfix reload
 ```
 
+Add a user to start EZ-Milter (this can be an existing user).
+```
+adduser milter
+su milter
+```
+
 Download ez-milter as the added user. You can also use git.
 ```
 wget https://github.com/nabe-abk/ez-milter/archive/refs/heads/main.zip
