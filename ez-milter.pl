@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #-------------------------------------------------------------------------------
-my $LastUpdate = '2026.02.05';
+my $LastUpdate = '2026.02.12';
 ################################################################################
 # EZ-Milter - Easy SPAM Mail Filter	   (C)2026 nabe@abk
 #	https://github.com/nabe-abk/ez-milter/
@@ -114,6 +114,7 @@ HELP
 # Init
 #-------------------------------------------------------------------------------
 &log("EZ-Milter - Easy SPAM Mail Filter	 --- $LastUpdate (C)nabe\@abk");
+&log("Default mode: " . ($MODE ?  &get_smfis_code_name($MODE) : "Add '$DETECT_HEADER' header"));
 
 if (!-e $USER_FILTER) {
 	&log("Copy default user filter from $USER_FILTER.sample");
@@ -156,13 +157,12 @@ if (1) {
 # callback types: close connect helo abort envfrom envrcpt header eoh eom
 #
 my %cb;
-my $c_name;
-my $c_ip;
-my $c_host;
-my $env_from;
-my $rcpt_to;
+
+my $arg;
 my %header;
-my $body = '';
+my $body;
+my $pre_DATA;
+my $log_head;
 
 $cb{negotiate} = sub {
 	my $ctx   = shift;
@@ -177,39 +177,66 @@ $cb{negotiate} = sub {
 
 $cb{helo} = sub {
 	my $ctx = shift;
+	#
+	# undef, because multiple message can be sent over the same connection.
+	#
+	undef %header;
+	$arg = new arg_service({
+		header	=> \%header
+	});
+	$body     = '';
+	$pre_DATA =  1;
 	#{
         #	daemon_addr => '192.168.0.10',
         #	daemon_name => 'my.example.jp',
         #	v           => 'Postfix 3.10.5',
         #	j           => 'sender_name.example.jp',
-        #	_           => 'look_up_host_name [client ip]',
+        #	_           => 'lookup_host_name [client ip]',
         #};
 	eval {
 		my $c = $ctx->{symbols}->{C};
-		$c_name = $c->{j};
+		$arg->{c_name} = $c->{j};
 		if ($c->{_} =~ /^([^\s]*)\s\[(.*)\]/) {
-			$c_ip   = $2;
-			$c_host = $1;	# lookup name
+			$arg->{c_ip}   = $2;
+			$arg->{c_host} = $1;	# lookup name
 		}
 	};
-	$DEBUG && print "client name:   $c_name\n";
-	$DEBUG && print "client adress: $c_ip\n";
-	$DEBUG && print "client host:   $c_host\n";
+	$log_head= $arg->{log_head} = "from=<$arg->{c_ip}>";
+
+	$DEBUG && print "client name:   $arg->{c_name}\n";
+	$DEBUG && print "client adress: $arg->{c_ip}\n";
+	$DEBUG && print "client host:   $arg->{c_host}\n";
 
 	return SMFIS_CONTINUE;
 };
 $cb{envfrom} = sub {
-	my $ctx   = shift;
-	$env_from = shift =~ s/^<(.*)>$/$1/r;
-	$DEBUG && print "MAIL FROM: $env_from\n";
+	my $ctx = shift;
+	$arg->{env_from} = shift =~ s/^<(.*)>$/$1/r;
+	$log_head = $arg->{log_head} = "from=<$arg->{env_from}>";
+	$DEBUG && print "MAIL FROM: $arg->{env_from}\n";
+
 	return SMFIS_CONTINUE;
 };
 $cb{envrcpt} = sub {
-	my $ctx  = shift;
-	$rcpt_to = shift   =~ s/^<(.*)>$/$1/r;
-	$DEBUG && print "RCPT TO:   $rcpt_to\n";
+	my $ctx = shift;
+	$arg->{rcpt_to} = shift =~ s/^<(.*)>$/$1/r;
+	$DEBUG && print "RCPT TO:   $arg->{rcpt_to}\n";
+
+	my $r = &call_user_filter($ctx, 'check_pre_DATA');
+	if ($r != SMFIS_CONTINUE) {
+		$pre_DATA = 0;
+	}
+	return $r;
+};
+
+$cb{data} = sub {
+	my $ctx = shift;
+	$pre_DATA = 0;
+
+	$DEBUG && print "DATA command\n";
 	return SMFIS_CONTINUE;
 };
+
 $cb{header} = sub {
 	my $ctx = shift;
 	my $key = shift;
@@ -229,6 +256,7 @@ $cb{eoh} = sub {
 	my $ctx = shift;
 	$body .= "\r\n";
 
+	$DEBUG && print "End of header\n";
 	return SMFIS_CONTINUE;
 };
 
@@ -250,18 +278,6 @@ $cb{body} = sub {
 #-------------------------------------------------------------------------------
 # call user filter
 #-------------------------------------------------------------------------------
-my $log_head;
-sub add_header {
-	my $ctx = shift;
-	my $key = shift;
-	my $val = shift;
-	&log("$log_head Add \"$key: $val\"");
-
-	if (ref($ctx) eq 'Sendmail::PMilter::Context') {
-		$ctx->addheader($key, $val);
-	}
-}
-
 $cb{eom} = sub {
 	my $ctx = shift;
 	my $to_name   = $header{to}   =~ m|(.*)\s*<.*| ? $1 : '';	# remove <adr@dom>
@@ -270,8 +286,6 @@ $cb{eom} = sub {
 	$from_name =~ s/^"([^"]*)"$/$1/;		#
 	$DEBUG && print "To name:   $to_name\n";
 	$DEBUG && print "From name: $from_name\n";
-
-	$log_head = "from=<$env_from>";
 
 	# use Sakia::Net::MailParser.pm
 	my $mail = $parser->parse("$body\n", 'utf8');
@@ -295,35 +309,47 @@ $cb{eom} = sub {
 	#-------------------------------------------------------------
 	# call user filter
 	#-------------------------------------------------------------
-	my $filter = &load_filter_function();
+	$arg->{to_name}   = $to_name;
+	$arg->{from_name} = $from_name;
+	$arg->{body}      = $mail->{body};
+	$arg->{html}      = $mail->{html};
+	$arg->{attaches}  = $mail->{attaches};
+
+	return &call_user_filter($ctx);
+};
+
+sub call_user_filter {
+	my $ctx   = shift;
+	my $fname = shift;
+	my $main_mode = $fname eq '' || $fname eq 'main';
+
+	my $filter = &load_filter_function($fname);
 	if (!$filter) {
-		&log("$log_head Accept (filter load failed)");
-		return SMFIS_CONTINUE;	# if error continue
+		if ($main_mode) {
+			&log("$log_head Accept (filter load failed)");
+		}
+		return SMFIS_CONTINUE;	# no filter
 	}
-	my $arg = new arg_service({
-		ctx	=> $ctx,
-		c_name	=> $c_name,
-		c_ip	=> $c_ip,
-		c_host	=> $c_host,
-		env_from=> $env_from,
-		rcpt_to	=> $rcpt_to,
-		to_name => $to_name,
-		from_name=>$from_name,
-
-		header	=> \%header,
-		body	=> $mail->{body},
-		html	=> $mail->{html},
-		attaches=> $mail->{attaches}
-	});
-
 	my ($r, $reason, @reply) = &$filter($arg);
-	if ($r == $ACCEPT) {
-		&add_header($ctx, $DETECT_HEADER, "no");
-		return SMFIS_CONTINUE;	# Accept
-	}
-	if ($r == $NO_CHECK) {
-		&add_header($ctx, $DETECT_HEADER, "no check");
-		return SMFIS_CONTINUE;	# Accept
+
+	if ($main_mode) {
+		if ($r == $ACCEPT) {
+			&add_header($ctx, $DETECT_HEADER, "no");
+			return SMFIS_CONTINUE;	# Accept
+		}
+		if ($r == $NO_CHECK) {
+			&add_header($ctx, $DETECT_HEADER, "no check");
+			return SMFIS_CONTINUE;	# Accept
+		}
+
+	} else {
+		if ($r==$ACCEPT) {
+			return SMFIS_CONTINUE;	# Continue
+		}
+		if ($r==$NO_CHECK || $r==$IS_SPAM || $r==$ADD_HEADER) {
+			&log("$log_head Illegal return value (NO_CHECK or IS_SPAM or ADD_HEADER) on check_pre_DATA()");
+			return SMFIS_CONTINUE;
+		}
 	}
 
 	#-------------------------------------------------------------
@@ -347,6 +373,25 @@ $cb{eom} = sub {
 	}
 
 	return $res;
+}
+
+sub add_header {
+	my $ctx = shift;
+	my $key = shift;
+	my $val = shift;
+	&log("$log_head Add \"$key: $val\"");
+
+	if (ref($ctx) eq 'Sendmail::PMilter::Context') {
+		$ctx->addheader($key, $val);
+	}
+}
+
+$cb{quit} = sub {
+	my $ctx = shift;
+	if ($pre_DATA && $arg->{env_from}) {
+		&log("$log_head Connection broken before DATA");
+	}
+	return SMFIS_CONTINUE;
 };
 
 #-------------------------------------------------------------------------------
@@ -355,7 +400,7 @@ $cb{eom} = sub {
 if ($TEST_FILE eq '') {
 	my $milter = new Sendmail::PMilter;
 
-	&log("bind localhost:$PORT");
+	&log("Bind localhost:$PORT");
 	$milter->setconn("inet:$PORT");
 
 	$milter->register($MILTER_NAME, \%cb, SMFI_CURR_ACTS);
@@ -563,8 +608,9 @@ sub load_user_filter {
 }
 
 sub load_filter_function {
+	my $name = shift || 'main';
 	no strict 'refs';
-	return *{$USER_FILTER_PACKAGE . '::main'}{CODE};
+	return *{$USER_FILTER_PACKAGE . '::' . $name}{CODE};
 }
 
 #-------------------------------------------------------------------------------
@@ -630,10 +676,17 @@ sub fread_lines {
 package arg_service;
 sub new {
 	my $class = shift;
-	return bless(shift, $class);
+	my $self  = shift;
+	$self->{can_check_spf} = $Mail::SPF_XS::VERSION;
+	return bless($self, $class);
 }
 
 sub check_spf {
+	my $arg = shift;
+	if ($arg->{_spf_result}) { return $arg->{_spf_result} };
+	return ( $arg->{_spf_result} = $arg->do_check_spf(@_) );
+}
+sub do_check_spf {
 	my $arg = shift;
 	my $spf = Mail::SPF_XS::Server->new({});
 	my $req = Mail::SPF_XS::Request->new({
@@ -653,4 +706,9 @@ sub add_header {
 	my $key = shift;
 	my $val = shift;
 	&main::add_header($arg->{ctx}, $key, $val);
+}
+
+sub log {
+	my $arg = shift;
+	&main::log("$arg->{log_head} " . shift, @_);
 }
