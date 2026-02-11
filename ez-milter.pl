@@ -264,8 +264,8 @@ sub add_header {
 
 $cb{eom} = sub {
 	my $ctx = shift;
-	my $to_name   = $header{to}   =~ s/\s*<.*//rs;	# remove <adr@dom>
-	my $from_name = $header{from} =~ s/\s*<.*//rs;	#
+	my $to_name   = $header{to}   =~ m|(.*)\s*<.*| ? $1 : '';	# remove <adr@dom>
+	my $from_name = $header{from} =~ m|(.*)\s*<.*| ? $1 : '';	#
 	$to_name   =~ s/^"([^"]*)"$/$1/;		# dequote
 	$from_name =~ s/^"([^"]*)"$/$1/;		#
 	$DEBUG && print "To name:   $to_name\n";
