@@ -18,8 +18,8 @@ chmod $FILE_MODE $PROG
 #-------------------------------------------------
 PID=`ps h -o pid -C $PROG`
 if [ "$PID" != "" ]; then
-	echo kill -KILL $PID
-	kill -KILL $PID
+	echo kill $PID
+	kill $PID
 fi
 if [ "$1" = "stop" ]; then
 	exit;
