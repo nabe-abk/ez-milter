@@ -11,6 +11,7 @@ my %USER = map { $_ => 1 } qw(
 );
 #-------------------------------------------------------------------------------
 use constant ACCEPT     =>   0;
+use constant CONTINUE   =>   0;		# same as ACCEPT
 use constant NO_CHECK   =>   1;		# No check filter
 use constant IS_SPAM    =>   2;		# default SPAM action
 use constant ADD_HEADER =>  -1;		# force add header and email is accept
@@ -26,9 +27,9 @@ use constant TEMPFAIL   => 104;		# force TEMPFAIL =SMFIS_TEMPFAIL
 #
 sub main {
 	my $arg      = shift;
-	my $c_name   = $arg->{c_name};
+	my $c_name   = $arg->{c_name};		# HELO hostname
 	my $c_ip     = $arg->{c_ip};
-	my $c_host   = $arg->{c_host};
+	my $c_host   = $arg->{c_host};		# lookup hostname
 	my $env_from = $arg->{env_from};
 	my $rcpt_to  = $arg->{rcpt_to};
 	my $to_name  = $arg->{to_name};
@@ -38,19 +39,6 @@ sub main {
 	my $html     = $arg->{html};
 	my $attaches = $arg->{attaches};	# array ref
 
-	if ($Mail::SPF_XS::VERSION) {
-		#
-		# SPF function require Mail::SPF_XS library.
-		#	apt-get install libmail-spf-xs-perl
-		#
-		my $code = $arg->check_spf();			# pass fail softfail none
-		$arg->add_header('X-SPF-Check', $code);		# add Header
-
-		if ($code eq 'fail' || $code eq 'softfail') {
-			return (REJECT, "SPF $code", '5.7.1', 'SPF fail');
-		}
-	}
-
 	if (! $USER{$rcpt_to}) {
 		return NO_CHECK;
 	}
@@ -58,6 +46,14 @@ sub main {
 	# setted "to name"
 	if ($to_name ne '' && $to_name ne $rcpt_to && $to_name ne ($rcpt_to =~ s/\@.*//rg)) {
 		return ACCEPT;
+	}
+
+	# check PowerMTA
+	if ($c_host eq 'unknown') {
+		my $sock = $arg->try_connect($c_ip, 25);
+		if ($sock && $sock->read_line() =~ /PowerMTA/) {
+			return (IS_SPAM, "Decect PowerMTA server");
+		}
 	}
 
 	# fake link
@@ -82,5 +78,35 @@ sub main {
 
 	return ACCEPT;
 }
+
+################################################################################
+# pre DATA command
+################################################################################
+# This function does not need to exist.
+# These return value cannot be used: NO_CHECK, IS_SPAM, ADD_HEADER
+#
+sub check_pre_DATA {
+	my $arg      = shift;
+	my $c_name   = $arg->{c_name};		# HELO hostname
+	my $c_ip     = $arg->{c_ip};
+	my $c_host   = $arg->{c_host};		# lookup hostname
+	my $env_from = $arg->{env_from};
+	my $rcpt_to  = $arg->{rcpt_to};
+
+	if ($arg->{can_check_spf}) {
+		#
+		# SPF function require Mail::SPF_XS library.
+		#	apt-get install libmail-spf-xs-perl
+		#
+		my $code = $arg->check_spf();			# pass fail softfail none
+
+		if ($code eq 'fail' || $code eq 'softfail') {
+			return (REJECT, "SPF $code", '5.7.1', 'SPF fail');
+		}
+		$arg->add_header('X-SPF-Check', $code);		# add Header
+	}
+	return CONTINUE;
+}
+
 ################################################################################
 1;

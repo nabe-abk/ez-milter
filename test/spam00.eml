@@ -1,5 +1,5 @@
 Return-Path: <info.kgfixmn@mawenwd.cn>
-Received: from mawenwd.cn (unknown [101.47.156.14])
+Received: from mawenwd.cn (unknown__ [101.47.156.14])
 	by example.jp (Postfix) with ESMTPS id 0901990
 	for <username@example.jp>; Thu, 12 Feb 2026 10:34:47 +0900 (JST)
 DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; s=mail; d=mawenwd.cn;

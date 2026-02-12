@@ -5,21 +5,27 @@ my $LastUpdate = '2026.02.12';
 # EZ-Milter - Easy SPAM Mail Filter	   (C)2026 nabe@abk
 #	https://github.com/nabe-abk/ez-milter/
 ################################################################################
+use v5.14;
+use strict;
 BEGIN {
 	my $path = $0;
 	$path =~ s|/[^/]*||;
 	if ($path) { chdir($path); }
 	unshift(@INC, './');
 }
-use strict;
 use Fcntl;
 use threads;
 
+use Time::HiRes;
 use Sakia::Net::MailParser;
 use Sendmail::PMilter qw(:all);
 eval {
-	require Mail::SPF_XS;	# Required for SPF checks
+	require Mail::SPF_XS;		# Required for SPF checks
 };
+eval {
+	require IO::Socket::IP;		# Required try_connect() function
+};
+
 ################################################################################
 my $DEBUG = 0;
 my $PRINT = 1;
@@ -276,7 +282,7 @@ $cb{body} = sub {
 $cb{quit} = sub {
 	my $ctx = shift;
 	if ($pre_DATA && $arg->{rcpt_to}) {
-		&log("Connection was closed after RCPT TO and before DATA");
+		&log("Connection closed after RCPT TO and before DATA");
 	}
 	return SMFIS_CONTINUE;
 };
@@ -517,6 +523,7 @@ else {
 		if ($send_SMFIR_SKIP) { last; }
 	}
 	&callback('eom');
+	&callback('quit');
 
 	print "ACCEPT\n";
 }
@@ -665,8 +672,11 @@ sub log {
 	my $ts  = &get_timestamp();
 	chomp($msg);
 
+	my $from = $arg->{env_from} ne '' ? " from=<$arg->{env_from}>" : '';
+	my $to   = $arg->{rcpt_to}  ne '' ? " to=<$arg->{rcpt_to}>"    : '';
+
 	local($|) = 1;
-	my $head = $in_THREAD ? "ip=<$arg->{c_ip}> from=<$arg->{env_from}> to=<$arg->{rcpt_to}> " : '';
+	my $head = $in_THREAD ? "ip=<$arg->{c_ip}>$from$to " : '';
 	print "$ts $head$msg\n";
 }
 
@@ -729,4 +739,59 @@ sub add_header {
 sub log {
 	my $arg = shift;
 	&main::log(@_);
+}
+
+sub try_connect {
+	my $arg  = shift;
+	my $ip   = shift;
+	my $port = shift;
+	my $timeout = shift || 5;
+
+	if (! $IO::Socket::IP::VERSION) {
+		&main::log("IO::Socket::IP is not found in try_connect()");
+		return;
+	};
+	*IO::Socket::IP::read_line = &_read_line_for_IO_Socket;
+
+	return IO::Socket::IP->new(
+		PeerHost => $ip,
+		PeerPort => $port,
+		Proto    => 'tcp',
+		Timeout  => $timeout
+	);
+}
+
+sub _read_line_for_IO_Socket {
+	my $sock    = shift;
+	my $timeout = shift;
+	if (!$timeout) {
+		return (my $x = <$sock>);
+	}
+
+	my $vec='';
+	vec($vec, fileno($sock), 1)=1;
+	my $blocking = $sock->blocking(0);
+	$sock->blocking(0);
+
+	my $t0  = [Time::HiRes::gettimeofday()];
+	my $line='';
+	LOOP: while(1) {
+		my $remain = $timeout - Time::HiRes::tv_interval($t0);
+		if ($remain <= 0) { last; }
+
+		select(my $rvec=$vec, undef, my $evec=$vec, $remain);
+		if ($evec eq $vec) { last; }		# error
+
+		my $bytes=0;
+		while(1) {
+			$sock->recv(my $x, 1);
+			if ($x eq '') { last; }
+			$line .= $x;
+			$bytes++;
+			if ($x eq "\n") { last LOOP; }
+		}
+		if (!$bytes) { last; }
+	}
+	$sock->blocking($blocking);
+	return $line;
 }
