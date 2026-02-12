@@ -1,4 +1,4 @@
-# EZ-Milter - Easy SPAM Mail Filter
+# Easy SPAM Mail Filter
 
 It is a rule-based email filter using the "Sendmail Milter API" for Postfix.
 You can create email filters with just a little perl code.
