@@ -163,7 +163,6 @@ my $arg;
 my %header;
 my $body;
 my $pre_DATA;
-my $log_head;
 
 $cb{negotiate} = sub {
 	my $ctx   = shift;
@@ -203,8 +202,6 @@ $cb{helo} = sub {
 			$arg->{c_host} = $1;	# lookup name
 		}
 	};
-	$log_head= $arg->{log_head} = "from=<$arg->{c_ip}>";
-
 	$DEBUG && print "client name:   $arg->{c_name}\n";
 	$DEBUG && print "client adress: $arg->{c_ip}\n";
 	$DEBUG && print "client host:   $arg->{c_host}\n";
@@ -214,7 +211,6 @@ $cb{helo} = sub {
 $cb{envfrom} = sub {
 	my $ctx = shift;
 	$arg->{env_from} = shift =~ s/^<(.*)>$/$1/r;
-	$log_head = $arg->{log_head} = "from=<$arg->{env_from}>";
 	$DEBUG && print "MAIL FROM: $arg->{env_from}\n";
 
 	return SMFIS_CONTINUE;
@@ -274,6 +270,14 @@ $cb{body} = sub {
 		$send_SMFIR_SKIP = 1;	# Skip subsequent body callbacks
 	}
 
+	return SMFIS_CONTINUE;
+};
+
+$cb{quit} = sub {
+	my $ctx = shift;
+	if ($pre_DATA && $arg->{rcpt_to}) {
+		&log("Connection was closed after RCPT TO and before DATA");
+	}
 	return SMFIS_CONTINUE;
 };
 
@@ -342,7 +346,7 @@ sub call_user_filter {
 	my $filter = &load_filter_function($fname);
 	if (!$filter) {
 		if ($main_mode) {
-			&log("$log_head Accept (filter load failed)");
+			&log("Accept (filter load failed)");
 		}
 		return SMFIS_CONTINUE;	# no filter
 	}
@@ -363,7 +367,7 @@ sub call_user_filter {
 			return SMFIS_CONTINUE;	# Continue
 		}
 		if ($r==$NO_CHECK || $r==$IS_SPAM || $r==$ADD_HEADER) {
-			&log("$log_head Illegal return value (NO_CHECK or IS_SPAM or ADD_HEADER) on check_pre_DATA()");
+			&log("Illegal return value (NO_CHECK or IS_SPAM or ADD_HEADER) on check_pre_DATA()");
 			return SMFIS_CONTINUE;
 		}
 	}
@@ -380,7 +384,7 @@ sub call_user_filter {
 		return SMFIS_CONTINUE;	# Accept
 	}
 
-	&log("$log_head " . &get_smfis_code_name($res) . " ($reason)");
+	&log(&get_smfis_code_name($res) . " ($reason)");
 
 	if ($res == SMFIS_REJECT && @reply) {
 		if (ref($ctx) eq 'Sendmail::PMilter::Context') {
@@ -395,7 +399,7 @@ sub add_header {
 	my $ctx = shift;
 	my $key = shift;
 	my $val = shift;
-	&log("$log_head Add \"$key: $val\"");
+	&log("Add \"$key: $val\"");
 
 	if (ref($ctx) eq 'Sendmail::PMilter::Context') {
 		if ($ctx->{cb} eq 'eom') {
@@ -405,14 +409,6 @@ sub add_header {
 		}
 	}
 }
-
-$cb{quit} = sub {
-	my $ctx = shift;
-	if ($pre_DATA && $arg->{env_from}) {
-		&log("$log_head Connection broken before DATA");
-	}
-	return SMFIS_CONTINUE;
-};
 
 #-------------------------------------------------------------------------------
 # Start
@@ -533,7 +529,7 @@ exit(0);
 sub get_ithreads {
 	return $#{[ threads->list() ]}+1;
 }
-
+my $in_THREAD;
 sub my_dispatcher {		# "$this" is obj of Sendmail::PMilter
 	my $this    = shift;
 	my $srv     = shift;
@@ -544,6 +540,7 @@ sub my_dispatcher {		# "$this" is obj of Sendmail::PMilter
 
 	my $thread_main = sub {
 		my $sock = shift;
+		$in_THREAD = 1;
 
 		eval {
 			&$handler($sock);
@@ -669,7 +666,8 @@ sub log {
 	chomp($msg);
 
 	local($|) = 1;
-	print "$ts $msg\n";
+	my $head = $in_THREAD ? "ip=<$arg->{c_ip}> from=<$arg->{env_from}> to=<$arg->{rcpt_to}> " : '';
+	print "$ts $head$msg\n";
 }
 
 sub get_timestamp {
@@ -730,5 +728,5 @@ sub add_header {
 
 sub log {
 	my $arg = shift;
-	&main::log("$arg->{log_head} " . shift, @_);
+	&main::log(@_);
 }
