@@ -49,6 +49,7 @@ sub main {
 	}
 
 	# check PowerMTA
+	# ex) 220 localhost (PowerMTA(TM) v5.0r3) dummy ESMTP ready
 	if ($c_host eq 'unknown') {
 		my $sock = $arg->try_connect($c_ip, 25);	# IO::Socket::IP object
 		if ($sock) {					# https://metacpan.org/pod/IO::Socket

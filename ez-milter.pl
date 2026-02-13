@@ -60,9 +60,10 @@ my $TEST_FILE;
 	my $err  = '';
 	while(@ARGV) {
 		my $x = shift(@ARGV);
-		if ($x eq '-d') { $PRINT = $DEBUG = 1; next; }
+		if ($x eq '-d') { $PRINT = $DEBUG = 10; next; }
 		if ($x eq '-s') { $PRINT = 0; next; }
 		if ($x eq '-h') { $HELP  = 1; next; }
+		if ($x eq '-v') { $PRINT = 2; next; }
 
 		if ($x eq '-pass')    { $MODE = undef; next; }
 		if ($x eq '-reject')  { $MODE = SMFIS_REJECT;  next; }
@@ -97,6 +98,7 @@ Available options are:
   -m size	maximum email size to analyze [MB] (default: 1)
   -s		silent mode
   -d		debug mode
+  -v		verbose mode
   -h		view this help
 
 [Run modes]
@@ -281,7 +283,7 @@ $cb{body} = sub {
 
 $cb{quit} = sub {
 	my $ctx = shift;
-	if ($pre_DATA && $arg->{rcpt_to}) {
+	if (1<$PRINT && $pre_DATA && $arg->{rcpt_to}) {
 		&log("Connection closed after RCPT TO and before DATA");
 	}
 	return SMFIS_CONTINUE;
@@ -299,7 +301,7 @@ $cb{eom} = sub {
 	# add header by buffer. addheader is only valid for "eom".
 	#-------------------------------------------------------------
 	foreach(@add_header_buf) {
-		$ctx->addheader($_->{key}, $_->{val});
+		&add_header($ctx, $_->{key}, $_->{val});
 	}
 	undef @add_header_buf;
 
@@ -392,10 +394,8 @@ sub call_user_filter {
 
 	&log(&get_smfis_code_name($res) . " ($reason)");
 
-	if ($res == SMFIS_REJECT && @reply) {
-		if (ref($ctx) eq 'Sendmail::PMilter::Context') {
-		        $ctx->setreply(550, @reply);
-		}
+	if ($res == SMFIS_REJECT && @reply && !$ctx->{test_mode}) {
+	        $ctx->setreply(550, @reply);
 	}
 
 	return $res;
@@ -405,14 +405,14 @@ sub add_header {
 	my $ctx = shift;
 	my $key = shift;
 	my $val = shift;
+	if ($ctx->{cb} ne 'eom') {
+		push(@add_header_buf, { key=>$key, val=>$val });
+		return;
+	}
 	&log("Add \"$key: $val\"");
 
-	if (ref($ctx) eq 'Sendmail::PMilter::Context') {
-		if ($ctx->{cb} eq 'eom') {
-			$ctx->addheader($key, $val);
-		} else {
-			push(@add_header_buf, { key=>$key, val=>$val });
-		}
+	if (!$ctx->{test_mode}) {
+		$ctx->addheader($key, $val);
 	}
 }
 
@@ -456,7 +456,7 @@ else {
 		daemon_name => 'example.jp',
 		v           => 'Postfix 3.10.5'
 	);
-	my %ctx = ( symbols => { C => \%helo_c } );
+	my %ctx = ( test_mode=>1, symbols => { C => \%helo_c } );
 
 	my $env_from;
 	my $rcpt_to;
