@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #-------------------------------------------------------------------------------
-my $LastUpdate = '2026.02.20';
+my $LastUpdate = '2026.02.21';
 ################################################################################
 # EZ-Milter - Easy SPAM Mail Filter	   (C)2026 nabe@abk
 #	https://github.com/nabe-abk/ez-milter/
@@ -564,7 +564,7 @@ exit(0);
 # dispacher and Milter function
 ################################################################################
 sub get_ithreads {
-	return $#{[ threads->list() ]}+1;
+	return scalar(threads->list());		# not include detached threads
 }
 my $in_THREAD;
 sub my_dispatcher {		# "$this" is obj of Sendmail::PMilter
@@ -586,6 +586,7 @@ sub my_dispatcher {		# "$this" is obj of Sendmail::PMilter
 		if ($@) {
 			warn $@;
 		}
+		threads->detach;
 	};
 	while (1) {
 		my $sock = $srv->accept();
@@ -605,7 +606,6 @@ sub my_dispatcher {		# "$this" is obj of Sendmail::PMilter
 			&log("thread creation failed: $!\n");
 			next;
 		}
-		$th->detach;
 	}
 }
 
