@@ -23,7 +23,8 @@ eval {
 	require Mail::SPF_XS;		# Required for SPF checks
 };
 eval {
-	require IO::Socket::IP;		# Required try_connect() function
+	require IO::Socket::INET;	# For IO::Socket::IP is not installed
+	require IO::Socket::IP;		# corelist in "perl v5.19.8"
 };
 
 ################################################################################
@@ -827,54 +828,15 @@ sub try_connect {
 	my $arg  = shift;
 	my $ip   = shift;
 	my $port = shift;
-	my $timeout = shift || 5;
+	my $timeout = shift // 5;
 
-	if (! $IO::Socket::IP::VERSION) {
-		&main::log("IO::Socket::IP is not found in try_connect()");
-		return;
-	};
-	*IO::Socket::IP::read_line = \&_read_line_for_IO_Socket;
 	$arg->{DEBUG} && print "try_connect: $ip:$port\n";
 
-	return IO::Socket::IP->new(
+	my $class = $IO::Socket::IP::VERSION ? 'IO::Socket::IP' : 'IO::Socket::INET';
+	return $class->new(
 		PeerHost => $ip,
 		PeerPort => $port,
 		Proto    => 'tcp',
 		Timeout  => $timeout
 	);
-}
-
-sub _read_line_for_IO_Socket {
-	my $sock    = shift;
-	my $timeout = shift;
-	if (!$timeout) {
-		return (my $x = <$sock>);
-	}
-
-	my $vec='';
-	vec($vec, fileno($sock), 1)=1;
-	my $blocking = $sock->blocking(0);
-	$sock->blocking(0);
-
-	my $t0  = [Time::HiRes::gettimeofday()];
-	my $line='';
-	LOOP: while(1) {
-		my $remain = $timeout - Time::HiRes::tv_interval($t0);
-		if ($remain <= 0) { last; }
-
-		select(my $rvec=$vec, undef, my $evec=$vec, $remain);
-		if ($evec eq $vec) { last; }		# error
-
-		my $bytes=0;
-		while(1) {
-			$sock->recv(my $x, 1);
-			if ($x eq '') { last; }
-			$line .= $x;
-			$bytes++;
-			if ($x eq "\n") { last LOOP; }
-		}
-		if (!$bytes) { last; }
-	}
-	$sock->blocking($blocking);
-	return $line;
 }
