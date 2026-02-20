@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #-------------------------------------------------------------------------------
-my $LastUpdate = '2026.02.12';
+my $LastUpdate = '2026.02.20';
 ################################################################################
 # EZ-Milter - Easy SPAM Mail Filter	   (C)2026 nabe@abk
 #	https://github.com/nabe-abk/ez-milter/
@@ -71,7 +71,7 @@ my $TEST_FILE;
 
 		if ($x eq '-save')    { $SAVE_DIR  = shift(@ARGV); next; }
 		if ($x eq '-saveall') { $SAVE_ALL  = 1; next; }
-		if ($x eq '-days')    { $KEEP_DAYS = int(shift(@ARGV)); next; }
+		if ($x eq '-days')    { $KEEP_DAYS = shift(@ARGV)+0; next; }
 
 		if ($x eq '-pass')    { $MODE = undef; next; }
 		if ($x eq '-reject')  { $MODE = SMFIS_REJECT;  next; }
@@ -104,9 +104,9 @@ Available options are:
   -p port	Bind port number (default: 10025)
   -t file.eml	Milter test mode
   -m size	Maximum email size to analyze [MB] (default: 10)
-  -save dir	Save not ACCEPT e-mails to dir (exclude check_pre_DATA() REJECT)
-  -saveall	Save with ACCEPT e-mails
-  -days num	Number of days to keep e-mail files (default: 7, 0=infinitely)
+  -save dir	Save not ACCEPT mails to dir (exclude check_pre_DATA() REJECT)
+  -saveall	Save with ACCEPT mails
+  -days num	Number of days to keep mail files (default: 7, 0=infinitely)
   -s		Silent mode
   -d		Debug mode
   -v		Verbose mode
@@ -144,7 +144,7 @@ if (&load_user_filter()) {
 }
 if ($SAVE_DIR ne '') {
 	$SAVE_DIR =~ s|/*$|/|;
-	&log(($SAVE_ALL ? "All" : "REJECT/DISCARD") . " e-mails save to: $SAVE_DIR\n");
+	&log(($SAVE_ALL ? "All" : "REJECT/DISCARD") . " mails save to '$SAVE_DIR' (keep " . (0<$KEEP_DAYS ? "$KEEP_DAYS days" : 'indefinitely') . ")\n");
 
 	mkdir($SAVE_DIR);
 	if (!-d $SAVE_DIR || !-w $SAVE_DIR) {
