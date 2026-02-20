@@ -103,9 +103,9 @@ Available options are:
   -p port	Bind port number (default: 10025)
   -t file.eml	Milter test mode
   -m size	Maximum email size to analyze [MB] (default: 10)
-  -save dir	Save not ACCEPT emails to dir (exclude check_pre_DATA() REJECT)
-  -saveall	Save with ACCEPT emails
-  -days num	Number of days to keep email files (default: 7, 0=infinitely)
+  -save dir	Save not ACCEPT e-mails to dir (exclude check_pre_DATA() REJECT)
+  -saveall	Save with ACCEPT e-mails
+  -days num	Number of days to keep e-mail files (default: 7, 0=infinitely)
   -s		Silent mode
   -d		Debug mode
   -v		Verbose mode
@@ -143,7 +143,7 @@ if (&load_user_filter()) {
 }
 if ($SAVE_DIR ne '') {
 	$SAVE_DIR =~ s|/*$|/|;
-	&log(($SAVE_ALL ? "All" : "REJECT/DISCARD") . " emails save to: $SAVE_DIR\n");
+	&log(($SAVE_ALL ? "All" : "REJECT/DISCARD") . " e-mails save to: $SAVE_DIR\n");
 
 	mkdir($SAVE_DIR);
 	if (!-d $SAVE_DIR || !-w $SAVE_DIR) {
@@ -520,6 +520,7 @@ else {
 		my $func = $cb{$type};
 		if (!$func) { return; }
 
+		$ctx{cb}=$type;
 		my $r = &$func(\%ctx, @_);
 		if ($r == SMFIS_CONTINUE) { return; }
 
