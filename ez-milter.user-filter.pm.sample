@@ -1,6 +1,6 @@
 use strict;
 ################################################################################
-# user filter main
+# user filter
 ################################################################################
 # This file is automatically reloaded.
 #
@@ -53,6 +53,9 @@ sub main {
 	my $sock = $arg->try_connect($c_ip, 25, 3);	# 3rd argument is timeout(sec)
 	if ($sock) {					# $sock is IO::Socket::IP object
 		my $line = <$sock>;			# https://metacpan.org/pod/IO::Socket
+		if ($line ne '') {
+			$arg->add_header('X-Sender-Server', $line);
+		}
 		if ($line =~ /PowerMTA/) {
 			return (IS_SPAM, "Decect PowerMTA server");
 		}
@@ -106,7 +109,7 @@ sub check_pre_DATA {
 		if ($code eq 'fail' || $code eq 'softfail') {
 			return (REJECT, "SPF $code", '5.7.1', 'SPF fail');
 		}
-		$arg->add_header('X-SPF-Check', $code);		# add Header
+		$arg->add_header('X-SPF-Check', $code);
 	}
 	return CONTINUE;
 }
