@@ -706,7 +706,7 @@ sub log {
 	my $to   = $arg->{rcpt_to}  ne '' ? " to=<$arg->{rcpt_to}>"    : '';
 
 	local($|) = 1;
-	my $head = $in_THREAD ? "ip=<$arg->{c_ip}>$from$to " : '';
+	my $head = $in_THREAD ? "ip=$arg->{c_ip}$from$to " : '';
 	print "$ts $head$msg\n";
 }
 
