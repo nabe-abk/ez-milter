@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #-------------------------------------------------------------------------------
-my $LastUpdate = '2026.02.21';
+my $LastUpdate = '2026.02.26';
 ################################################################################
 # EZ-Milter - Easy SPAM Mail Filter	   (C)2026 nabe@abk
 #	https://github.com/nabe-abk/ez-milter/
@@ -11,7 +11,7 @@ BEGIN {
 	my $path = $0;
 	$path =~ s|/[^/]*||;
 	if ($path) { chdir($path); }
-	unshift(@INC, './');
+	unshift(@INC, './lib');
 }
 use Fcntl;
 use threads;
@@ -19,6 +19,7 @@ use threads;
 use Time::HiRes;
 use Sakia::Net::MailParser;
 use Sendmail::PMilter qw(:all);
+use Net::DNS::Lite;
 eval {
 	require Mail::SPF_XS;		# Required for SPF checks
 };
@@ -37,7 +38,7 @@ my $SAVE_DIR;
 my $SAVE_ALL;
 my $KEEP_DAYS = 7;
 
-my $USER_FILTER         = $0 =~ s|^.*/([\w\-\.]+)\.\w+$|$1.user-filter.pm|r;
+my $USER_FILTER         = $0 =~ s|^.*/([\w\-\.]+)\.\w+$|./$1.user-filter.pm|r;
 my $USER_FILTER_PACKAGE = 'user_filter';
 
 my $MILTER_NAME   = 'EZ-Milter';
@@ -152,7 +153,6 @@ if ($SAVE_DIR ne '') {
 		exit(11);
 	}
 }
-my $parser = new Sakia::Net::MailParser({});
 
 #-------------------------------------------------------------------------------
 # Patch to Sendmail::PMilter::Context
@@ -195,6 +195,10 @@ my %header;
 my $body;
 my $pre_DATA;
 
+my $parser = new Sakia::Net::MailParser({});
+my $DNS    = new Net::DNS::Lite;
+$DNS->{search} = [];		# clear default search domains
+
 $cb{negotiate} = sub {
 	my $ctx   = shift;
 	my $r_ver = shift;	# milter_protocol_version_ref
@@ -214,6 +218,7 @@ $cb{helo} = sub {
 	undef %header;
 	$arg = new arg_service({
 		ctx	=> $ctx,	# use by add_header() for user filter
+		DNS	=> $DNS,	# use by get_sender_domain_ip
 		header	=> \%header,
 		DEBUG	=> $DEBUG
 	});
@@ -839,4 +844,42 @@ sub try_connect {
 		Proto    => 'tcp',
 		Timeout  => $timeout
 	);
+}
+
+sub get_sender_domain_ip {
+	my $arg   = shift;
+	my $_host = shift;
+	my @mx    = $arg->dns_lookup('mx', $_host);
+	my $host  = @mx ? $mx[0] : $_host;
+	if (@mx && $mx[0] eq 'fail') {
+		return ('fail', 0);
+	}
+
+	my $ip;
+	foreach(qw(a aaaa)) {
+		my @res = $arg->dns_lookup($_, $host);
+		if ($res[0] eq 'fail') { $ip='fail';  last; }
+		if (@res)              { $ip=$res[0]; last; }
+	}
+	return ($ip, @mx ? 1 : 0);
+}
+
+sub dns_lookup {
+	my $arg     = shift;
+	my $type    = shift;
+	my $host    = shift;
+	my $timeout = shift || 3;
+	$type =~ tr/A-Z/a-z/;
+
+	my @rr = $arg->{DNS}->resolve($host, $type, timeout => $timeout);
+	if ($arg->{DNS}->{fail}) {
+		return 'fail';
+	}
+	if ($type eq 'a' || $type eq 'aaaa' || $type eq 'txt') {
+		return map { $_->[4] } @rr;
+	}
+	if ($type eq 'mx') {
+		return map { $_->[5] } sort({$a->[4] <=> $b->[4]} @rr);
+	}
+	return;
 }
