@@ -38,7 +38,7 @@ my $SAVE_DIR;
 my $SAVE_ALL;
 my $KEEP_DAYS = 7;
 
-my $USER_FILTER         = $0 =~ s|^.*/([\w\-\.]+)\.\w+$|./$1.user-filter.pm|r;
+my $USER_FILTER         = './user-filter.pm';
 my $USER_FILTER_PACKAGE = 'user_filter';
 
 my $MILTER_NAME   = 'EZ-Milter';
@@ -86,6 +86,10 @@ my $TEST_FILE;
 			$MAX_BODY = int(shift(@ARGV) * 1024*1024);
 			next;
 		}
+		if ($x eq '-f') {
+			$USER_FILTER = shift(@ARGV);
+			next;
+		}
 		if ($x eq '-t') {
 			$TEST_FILE = shift(@ARGV);
 			next;
@@ -103,6 +107,7 @@ Usage: $0 [options] [test-file.eml]
 
 Available options are:
   -p port	Bind port number (default: 10025)
+  -f filter.pm	User filter file (default: user-filter.pm)
   -t file.eml	Milter test mode
   -m size	Maximum email size to analyze [MB] (default: 10)
   -save dir	Save not ACCEPT mails to dir (exclude check_pre_DATA() REJECT)

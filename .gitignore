@@ -9,7 +9,7 @@
 !/LICENSE
 !/README.md
 !/ez-milter.pl
-!/ez-milter.user-filter.pm.sample
+!/user-filter.pm.sample
 !/milter_start.sh.sample
 
 #--------------------------------------
