@@ -284,7 +284,7 @@ $cb{header} = sub {
 	$key   =~ tr/A-Z/a-z/;
 
 	if (!exists($header{$key})) {
-		$header{$key} = $val;
+		$header{$key} = $val =~ s/\s+$//r;
 	}
 
 	return SMFIS_CONTINUE;
@@ -348,8 +348,8 @@ $cb{eom} = sub {
 	#-------------------------------------------------------------
 	# parse mail data
 	#-------------------------------------------------------------
-	my $to_name   = $header{to}   =~ m|(.*)\s*<.*| ? $1 : '';	# remove <adr@dom>
-	my $from_name = $header{from} =~ m|(.*)\s*<.*| ? $1 : '';	#
+	my $to_name   = $header{to}   =~ m|^(.*?)\s*<.*| ? $1 : '';	# remove <adr@dom>
+	my $from_name = $header{from} =~ m|^(.*?)\s*<.*| ? $1 : '';	#
 	$to_name   =~ s/^"([^"]*)"$/$1/;		# dequote
 	$from_name =~ s/^"([^"]*)"$/$1/;		#
 	$DEBUG && print "To name:   $to_name\n";
