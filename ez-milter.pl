@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #-------------------------------------------------------------------------------
-my $LastUpdate = '2026.02.26';
+my $LastUpdate = '2026.03.02';
 ################################################################################
 # EZ-Milter - Easy SPAM Mail Filter	   (C)2026 nabe@abk
 #	https://github.com/nabe-abk/ez-milter/
@@ -448,6 +448,7 @@ sub add_header {
 		push(@add_header_buf, { key=>$key, val=>$val });
 		return;
 	}
+	$val =~ s/\r?\n$//;
 	&log("Add \"$key: $val\"");
 
 	if (!$ctx->{test_mode}) {
