@@ -165,7 +165,6 @@ if ($SAVE_DIR ne '') {
 # To improve throughput.
 #
 my $send_SMFIR_SKIP;
-my $send_REJECT;	# REJECT or DISCARD or TEMPFAIL
 if (1) {
 	require Sendmail::PMilter::Context;
 	*Sendmail::PMilter::Context::write_packet
@@ -173,9 +172,7 @@ if (1) {
 		my $this = shift;
 		my $code = shift;
 		my $out  = shift // '';
-		if ($code != SMFIS_CONTINUE) {
-			$send_REJECT = 1;
-		} elsif (($SMFIP & SMFIP_SKIP) && $send_SMFIR_SKIP) {
+		if ($code==SMFIS_CONTINUE && ($SMFIP & SMFIP_SKIP) && $send_SMFIR_SKIP) {
 			$code = $SMFIR_SKIP;
 			$out  = '';
 			$send_SMFIR_SKIP = 0;
@@ -199,6 +196,7 @@ my $arg;
 my %header;
 my $body;
 my $pre_DATA;
+my $send_REJECT;	# REJECT or DISCARD or TEMPFAIL
 
 my $parser = new Sakia::Net::MailParser({});
 my $DNS    = new Net::DNS::Lite;
@@ -434,6 +432,9 @@ sub call_user_filter {
 
 	&log(&get_smfis_code_name($res) . " ($reason)");
 
+	if ($res != SMFIS_CONTINUE) {
+		$send_REJECT = 1;
+	}
 	if ($res == SMFIS_REJECT && @reply && !$ctx->{test_mode}) {
 	        $ctx->setreply(550, @reply);
 	}
