@@ -318,7 +318,7 @@ $cb{quit} = sub {
 	}
 	if (!$ctx->{test_mode} && $SAVE_DIR && ($SAVE_ALL || $send_REJECT) && $body) {
 		my $title = " $arg->{env_from} to $arg->{rcpt_to}" . ($header{subject} ne '' ? " - $header{subject}" : '');
-		$title =~ s|[\x00-\x1f\s]+| |g;
+		$title =~ s|[\x00-\x1f ]+| |g;
 		$title =~ s|[<>/:"'\\]|_|g;
 
 		&tmpwatch($SAVE_DIR);
