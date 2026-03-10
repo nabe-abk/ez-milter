@@ -296,7 +296,7 @@ $cb{header} = sub {
 	$key   =~ tr/A-Z/a-z/;
 
 	if (!exists($header{$key})) {
-		$header{$key} = $val =~ s/\s+$//r;
+		$header{$key} = $val =~ s/[\r\n\t ]+$//r;
 	}
 
 	return SMFIS_CONTINUE;
