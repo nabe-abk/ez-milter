@@ -36,13 +36,17 @@ my $MODE;
 my $MAX_BODY = 10 *1024*1024;	# 1MB
 my $SAVE_DIR;
 my $SAVE_ALL;
+my $SAVE_TXT;
 my $KEEP_DAYS = 7;
+my $INDEX;
 
 my $USER_FILTER         = './user-filter.pm';
 my $USER_FILTER_PACKAGE = 'user_filter';
 
 my $MILTER_NAME   = 'EZ-Milter';
 my $DETECT_HEADER = 'X-EZ-Spam-Detect';
+my $INDEX_FILE    = 'index.html';
+my $INDEX_TEMPLATE= 'template.html';
 #-------------------------------------------------------------------------------
 # Constant
 #-------------------------------------------------------------------------------
@@ -71,8 +75,10 @@ my $TEST_FILE;
 		if ($x eq '-v') { $PRINT = 2; next; }
 
 		if ($x eq '-save')    { $SAVE_DIR  = shift(@ARGV); next; }
-		if ($x eq '-saveall') { $SAVE_ALL  = 1; next; }
 		if ($x eq '-days')    { $KEEP_DAYS = shift(@ARGV)+0; next; }
+		if ($x eq '-saveall') { $SAVE_ALL  = 1; next; }
+		if ($x eq '-savetxt') { $SAVE_TXT  = 1; next; }
+		if ($x eq '-index')   { $INDEX     = 1; next; }
 
 		if ($x eq '-pass')    { $MODE = undef; next; }
 		if ($x eq '-reject')  { $MODE = SMFIS_REJECT;  next; }
@@ -112,6 +118,8 @@ Available options are:
   -m size	Maximum email size to analyze [MB] (default: 10)
   -save dir	Save non-ACCEPT mails (exclude check_pre_DATA()'s REJECT)
   -saveall	Save with ACCEPT mails
+  -savetxt	Save with .txt file (link file)
+  -index	Create index.html in save directory (use with -save option)
   -days num	Number of days to keep mail files (default: 7, 0=infinitely)
   -s		Silent mode
   -d		Debug mode
@@ -143,7 +151,11 @@ HELP
 
 if (!-e $USER_FILTER) {
 	&log("Copy default user filter from $USER_FILTER.sample");
-	system('cp', "$USER_FILTER.sample", $USER_FILTER);
+	&copy_file("$USER_FILTER.sample", $USER_FILTER);
+}
+if ($INDEX && !-e $INDEX_TEMPLATE) {
+	&log("Copy default template from $INDEX_TEMPLATE.sample");
+	&copy_file("$INDEX_TEMPLATE.sample", $INDEX_TEMPLATE);
 }
 if (&load_user_filter()) {
 	exit(10);
@@ -335,6 +347,10 @@ $cb{quit} = sub {
 
 		&tmpwatch($SAVE_DIR);
 		&save_email_file($title, $add . $body);
+
+		if ($INDEX) {
+			&create_index_html();
+		}
 	}
 	return SMFIS_CONTINUE;
 };
@@ -739,18 +755,6 @@ sub get_timestamp {
 }
 
 #-------------------------------------------------------------------------------
-# file read
-#-------------------------------------------------------------------------------
-sub fread_lines {
-	my $file = shift;
-	sysopen(my $fh, $file, O_RDONLY) || die("File can't read \"$file\"");
-	my @lines = <$fh>;
-	close($fh);
-
-	return \@lines;
-}
-
-#-------------------------------------------------------------------------------
 # save email file
 #-------------------------------------------------------------------------------
 sub save_email_file {
@@ -758,13 +762,58 @@ sub save_email_file {
 	my $file  = $SAVE_DIR . &get_timestamp(time, "%04d%02d%02d-%02d%02d%02d") . $title . '.eml';
 	if (1<$PRINT) { &log("Save to $file"); }
 
-	sysopen(my $fh, $file, O_CREAT | O_WRONLY | O_TRUNC);
-	if (!$fh) {
-		&log("Create email file failed: $file");
-		return;
+	&fwrite_lines($file, \@_);
+
+	# create link file
+	if ($SAVE_TXT || $INDEX) {
+		my $txt = $file =~ s/\.eml$/.txt/r;
+		link $file, $txt;
 	}
-	syswrite($fh, $_[0]);
-	close($fh);
+}
+
+#-------------------------------------------------------------------------------
+# create index html file
+#-------------------------------------------------------------------------------
+sub create_index_html {
+	my $files = &search_files( $SAVE_DIR, '.eml' );
+	$files = [ sort { $b cmp $a } @$files ];
+
+	my $lines = &fread_lines($INDEX_TEMPLATE);
+	my $before='';
+	my $skel  ='';
+	my $after ='';
+	my $out = \$before;
+	foreach(@$lines) {
+		if ($_ =~ /^\s*<!--\s*line-start-->\s*$/) { $out = \$skel;  next; }
+		if ($_ =~ /^\s*<!--\s*line-end-->\s*$/)   { $out = \$after; next; }
+		$$out .= $_;
+	}
+
+	my $data='';
+	foreach(@$files) {
+		my $x;
+		my %h;
+		($x, $h{subject}) = split(/ - /, $_ =~ s/\.\w+$//r);
+		($h{date}, $h{from}, $x, $h{to}) = split(/ /, $x);
+
+		$h{eml} = $_;
+		my $txt = $_  =~ s/\.\w+$/.txt/r;
+		$h{txt} = (-e $txt) ? $txt : '';
+
+		&tag_escape(%h);
+		$data .= $skel =~ s/<\@(\w+)>/$h{$1}/rg;
+	}
+
+	&fwrite_lines($SAVE_DIR . $INDEX_FILE, [ $before, $data, $after ]);
+}
+
+sub tag_escape {
+	foreach(@_) {
+		s/</&lt;/g;
+		s/>/&gt;/g;
+		s/"/&quot;/g;
+		s/'/&#39;/g;
+	}
 }
 
 #-------------------------------------------------------------------------------
@@ -785,6 +834,10 @@ sub tmpwatch {
 	}
 	return $c;
 }
+
+#-------------------------------------------------------------------------------
+# search files
+#-------------------------------------------------------------------------------
 sub search_files {
 	my $dir  = $_[0] . (substr(shift, -1) eq '/' ? '' : '/');
 	my $ext  = shift;
@@ -800,6 +853,45 @@ sub search_files {
 	}
 	closedir($fh);
 	return \@list;
+}
+
+#-------------------------------------------------------------------------------
+# read file
+#-------------------------------------------------------------------------------
+sub fread_lines {
+	my $file = shift;
+	sysopen(my $fh, $file, O_RDONLY) || die("File can't read \"$file\"");
+	my @lines = <$fh>;
+	close($fh);
+
+	return \@lines;
+}
+
+#-------------------------------------------------------------------------------
+# write file
+#-------------------------------------------------------------------------------
+sub fwrite_lines {
+	my $file  = shift;
+	my $lines = ref($_[0]) ? shift : [shift];
+	sysopen(my $fh, $file, O_CREAT | O_WRONLY | O_TRUNC);
+	if (!$fh) {
+		&log("Create index file failed: $file");
+		return;
+	}
+	foreach(@$lines) {
+		syswrite($fh, $_);
+	}
+	close($fh);
+}
+
+#-------------------------------------------------------------------------------
+# read file
+#-------------------------------------------------------------------------------
+sub copy_file {
+	my $src = shift;
+	my $des = shift;
+	my $lines = &fread_lines($src);
+	&fwrite_lines($des, $lines);
 }
 
 ################################################################################

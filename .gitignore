@@ -11,6 +11,7 @@
 !/ez-milter.pl
 !/user-filter.pm.sample
 !/milter_start.sh.sample
+!/template.html.sample
 
 #--------------------------------------
 # Library
