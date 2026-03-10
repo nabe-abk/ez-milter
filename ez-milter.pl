@@ -800,11 +800,16 @@ sub create_index_html {
 			$h{date} = "$1-$2-$3 $4:$5:$6";
 		}
 
-		$h{eml} = $_;
+		my $eml = $_;
 		my $txt = $_  =~ s/\.\w+$/.txt/r;
-		$h{txt} = (-e "$SAVE_DIR$txt") ? $txt : '#txt file not found';
+		$txt    = (-e "$SAVE_DIR$txt") ? $txt : '';
+		&tag_escape(%h, $txt, $eml);
 
-		&tag_escape(%h);
+		$h{eml} = $eml;
+		$h{txt} = $txt || '#txt file not found';
+		$h{eml_href} = "href=\"$eml\"";
+		$h{txt_href} = $txt ? "href=\"$txt\"" : '';
+
 		$data .= $skel =~ s/<\@(\w+)>/$h{$1}/rg;
 	}
 

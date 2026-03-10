@@ -32,7 +32,7 @@ th, td {
 <tbody>
 <!--line-start-->
 <tr>
-	<td><a href="<@txt>"><@date></a></td>
+	<td><a <@txt_href>><@date></a></td>
 	<td><@from></td>
 	<td><@to></td>
 	<td><@subject></td>
