@@ -796,9 +796,13 @@ sub create_index_html {
 		($x, $h{subject}) = split(/ - /, $_ =~ s/\.\w+$//r);
 		($h{date}, $h{from}, $x, $h{to}) = split(/ /, $x);
 
+		if ($h{date} =~ /^(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})/) {
+			$h{date} = "$1-$2-$3 $4:$5:$6";
+		}
+
 		$h{eml} = $_;
 		my $txt = $_  =~ s/\.\w+$/.txt/r;
-		$h{txt} = (-e $txt) ? $txt : '';
+		$h{txt} = (-e "$SAVE_DIR$txt") ? $txt : '#txt file not found';
 
 		&tag_escape(%h);
 		$data .= $skel =~ s/<\@(\w+)>/$h{$1}/rg;
