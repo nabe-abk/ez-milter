@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #-------------------------------------------------------------------------------
-my $LastUpdate = '2026.03.02';
+my $LastUpdate = '2026.03.10';
 ################################################################################
 # EZ-Milter - Easy SPAM Mail Filter	   (C)2026 nabe@abk
 #	https://github.com/nabe-abk/ez-milter/
@@ -110,7 +110,7 @@ Available options are:
   -f filter.pm	User filter file (default: user-filter.pm)
   -t file.eml	Milter test mode
   -m size	Maximum email size to analyze [MB] (default: 10)
-  -save dir	Save not ACCEPT mails to dir (exclude check_pre_DATA() REJECT)
+  -save dir	Save non-ACCEPT mails (exclude check_pre_DATA()'s REJECT)
   -saveall	Save with ACCEPT mails
   -days num	Number of days to keep mail files (default: 7, 0=infinitely)
   -s		Silent mode
@@ -197,6 +197,7 @@ my %header;
 my $body;
 my $pre_DATA;
 my $send_REJECT;	# REJECT or DISCARD or TEMPFAIL
+my @add_header_buf;
 
 my $parser = new Sakia::Net::MailParser({});
 my $DNS    = new Net::DNS::Lite;
@@ -219,6 +220,7 @@ $cb{helo} = sub {
 	# undef, because multiple message can be sent over the same connection.
 	#
 	undef %header;
+	undef @add_header_buf;
 	$arg = new arg_service({
 		ctx	=> $ctx,	# use by add_header() for user filter
 		DNS	=> $DNS,	# use by get_sender_domain_ip
@@ -316,13 +318,23 @@ $cb{quit} = sub {
 	if (1<$PRINT && !$send_REJECT && $pre_DATA && $arg->{rcpt_to}) {
 		&log("Connection closed after RCPT TO and before DATA");
 	}
-	if (!$ctx->{test_mode} && $SAVE_DIR && ($SAVE_ALL || $send_REJECT) && $body) {
+	if ($SAVE_DIR && ($SAVE_ALL || $send_REJECT) && $body) {
 		my $title = " $arg->{env_from} to $arg->{rcpt_to}" . ($header{subject} ne '' ? " - $header{subject}" : '');
 		$title =~ s|[\x00-\x1f ]+| |g;
 		$title =~ s|[<>/:"'\\]|_|g;
+		Encode::from_to($title, 'utf8', 'utf8');
+
+		# Add Headers
+		my $add='';
+		foreach(@add_header_buf) {
+			$add .= "$_->{key}: $_->{val}\r\n";
+		}
+		my $c = $ctx->{symbols}->{C};
+		$add   .= "Received: from $arg->{c_name} ($arg->{c_host} [$arg->{c_ip}])\r\n"
+			. "	by $c->{daemon_name} ($MILTER_NAME) for <$arg->{rcpt_to}>\r\n";
 
 		&tmpwatch($SAVE_DIR);
-		&save_email_file($title, $body);
+		&save_email_file($title, $add . $body);
 	}
 	return SMFIS_CONTINUE;
 };
@@ -330,8 +342,6 @@ $cb{quit} = sub {
 #-------------------------------------------------------------------------------
 # call user filter
 #-------------------------------------------------------------------------------
-my @add_header_buf;
-
 $cb{eom} = sub {
 	my $ctx = shift;
 
@@ -341,7 +351,6 @@ $cb{eom} = sub {
 	foreach(@add_header_buf) {
 		&add_header($ctx, $_->{key}, $_->{val});
 	}
-	undef @add_header_buf;
 
 	#-------------------------------------------------------------
 	# parse mail data
@@ -495,7 +504,7 @@ else {
 	my %helo_c = (
 		daemon_addr => '192.168.0.10',
 		daemon_name => 'example.jp',
-		v           => 'Postfix 3.10.5'
+		v           => $MILTER_NAME
 	);
 	my %ctx = ( test_mode=>1, symbols => { C => \%helo_c } );
 
