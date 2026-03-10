@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #-------------------------------------------------------------------------------
-my $LastUpdate = '2026.03.10';
+my $LastUpdate = '2026.03.11';
 ################################################################################
 # EZ-Milter - Easy SPAM Mail Filter	   (C)2026 nabe@abk
 #	https://github.com/nabe-abk/ez-milter/
@@ -209,7 +209,9 @@ my %header;
 my $body;
 my $pre_DATA;
 my $send_REJECT;	# REJECT or DISCARD or TEMPFAIL
+
 my @add_header_buf;
+my $out_headers;
 
 my $parser = new Sakia::Net::MailParser({});
 my $DNS    = new Net::DNS::Lite;
@@ -232,7 +234,6 @@ $cb{helo} = sub {
 	# undef, because multiple message can be sent over the same connection.
 	#
 	undef %header;
-	undef @add_header_buf;
 	$arg = new arg_service({
 		ctx	=> $ctx,	# use by add_header() for user filter
 		DNS	=> $DNS,	# use by get_sender_domain_ip
@@ -243,6 +244,8 @@ $cb{helo} = sub {
 	$pre_DATA =  1;
 	$send_SMFIR_SKIP = 0;
 	$send_REJECT     = 0;
+	undef @add_header_buf;
+	$out_headers='';
 	#{
         #	daemon_addr => '192.168.0.10',
         #	daemon_name => 'my.example.jp',
@@ -322,36 +325,6 @@ $cb{body} = sub {
 		$send_SMFIR_SKIP = 1;	# Skip subsequent body callbacks
 	}
 
-	return SMFIS_CONTINUE;
-};
-
-$cb{quit} = sub {
-	my $ctx = shift;
-	if (1<$PRINT && !$send_REJECT && $pre_DATA && $arg->{rcpt_to}) {
-		&log("Connection closed after RCPT TO and before DATA");
-	}
-	if ($SAVE_DIR && ($SAVE_ALL || $send_REJECT) && $body) {
-		my $title = " $arg->{env_from} to $arg->{rcpt_to}" . ($header{subject} ne '' ? " - $header{subject}" : '');
-		$title =~ s|[\x00-\x1f ]+| |g;
-		$title =~ s|[<>/:"'\\]|_|g;
-		Encode::from_to($title, 'utf8', 'utf8');
-
-		# Add Headers
-		my $add='';
-		foreach(@add_header_buf) {
-			$add .= "$_->{key}: $_->{val}\r\n";
-		}
-		my $c = $ctx->{symbols}->{C};
-		$add   .= "Received: from $arg->{c_name} ($arg->{c_host} [$arg->{c_ip}])\r\n"
-			. "	by $c->{daemon_name} ($MILTER_NAME) for <$arg->{rcpt_to}>\r\n";
-
-		&tmpwatch($SAVE_DIR);
-		&save_email_file($title, $add . $body);
-
-		if ($INDEX) {
-			&create_index_html();
-		}
-	}
 	return SMFIS_CONTINUE;
 };
 
@@ -476,11 +449,43 @@ sub add_header {
 	}
 	$val =~ s/\r?\n$//;
 	&log("Add \"$key: $val\"");
+	$out_headers .= "$key: $val\r\n";
 
 	if (!$ctx->{test_mode}) {
 		$ctx->addheader($key, $val);
 	}
 }
+
+#-------------------------------------------------------------------------------
+# save email
+#-------------------------------------------------------------------------------
+$cb{quit} = sub {
+	my $ctx = shift;
+	if (1<$PRINT && !$send_REJECT && $pre_DATA && $arg->{rcpt_to}) {
+		&log("Connection closed after RCPT TO and before DATA");
+	}
+	if ($SAVE_DIR && ($SAVE_ALL || $send_REJECT) && $body) {
+		my $title = " $arg->{env_from} to $arg->{rcpt_to}" . ($header{subject} ne '' ? " - $header{subject}" : '');
+		$title =~ s|[\x00-\x1f ]+| |g;
+		$title =~ s|[<>/:"'\\]|_|g;
+		Encode::from_to($title, 'utf8', 'utf8');
+
+		# Add Headers
+		my $sym = $ctx->{symbols};
+		my $c   = $sym->{C};
+		$out_headers
+			.= "Received: from $arg->{c_name} ($arg->{c_host} [$arg->{c_ip}])\r\n"
+			.  "	by $c->{'{daemon_name}'} ($MILTER_NAME) with ESMTP id $sym->{B}->{i} for <$arg->{rcpt_to}>\r\n";
+
+		&tmpwatch($SAVE_DIR);
+		&save_email_file($title, $out_headers, $body);
+
+		if ($INDEX) {
+			&create_index_html();
+		}
+	}
+	return SMFIS_CONTINUE;
+};
 
 #-------------------------------------------------------------------------------
 # Start
