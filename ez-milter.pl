@@ -431,7 +431,8 @@ sub call_user_filter {
 	&log(&get_smfis_code_name($res) . " ($reason)");
 
 	if ($res != SMFIS_CONTINUE) {
-		$send_REJECT = 1;
+		$send_REJECT  = 1;
+		$out_headers .= "$DETECT_HEADER: yes ($reason)\r\n";
 	}
 	if ($res == SMFIS_REJECT && @reply && !$ctx->{test_mode}) {
 	        $ctx->setreply(550, @reply);
