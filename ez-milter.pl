@@ -1,6 +1,6 @@
 #!/usr/bin/perl
 #-------------------------------------------------------------------------------
-my $LastUpdate = '2026.03.11';
+my $LastUpdate = '2026.06.10';
 ################################################################################
 # EZ-Milter - Easy SPAM Mail Filter	   (C)2026 nabe@abk
 #	https://github.com/nabe-abk/ez-milter/
@@ -212,6 +212,7 @@ my $send_REJECT;	# REJECT or DISCARD or TEMPFAIL
 
 my @add_header_buf;
 my $out_headers;
+my $mail_obj;
 
 my $parser = new Sakia::Net::MailParser({});
 my $DNS    = new Net::DNS::Lite;
@@ -246,6 +247,7 @@ $cb{helo} = sub {
 	$send_REJECT     = 0;
 	undef @add_header_buf;
 	$out_headers='';
+	$mail_obj = undef;
 	#{
         #	daemon_addr => '192.168.0.10',
         #	daemon_name => 'my.example.jp',
@@ -352,7 +354,7 @@ $cb{eom} = sub {
 	$DEBUG && print "From name: $from_name\n";
 
 	# use Sakia::Net::MailParser.pm
-	my $mail = $parser->parse("$body\n", 'utf8');
+	my $mail = $mail_obj = $parser->parse("$body\n", 'utf8');
 	if ($mail->{html} && $mail->{html_charset}) {
 		Encode::from_to($mail->{html}, $mail->{html_charset}, 'utf8');
 		$mail->{html_charset} = 'utf8';
@@ -467,8 +469,6 @@ $cb{quit} = sub {
 	}
 	if ($SAVE_DIR && ($SAVE_ALL || $send_REJECT) && $body) {
 		my $title = " $arg->{env_from} to $arg->{rcpt_to}" . ($header{subject} ne '' ? " - $header{subject}" : '');
-		$title =~ s|[\x00-\x1f ]+| |g;
-		$title =~ s|[<>/:"'\\]|_|g;
 		Encode::from_to($title, 'utf8', 'utf8');
 
 		# Add Headers
@@ -568,6 +568,7 @@ else {
 		my $r = &$func(\%ctx, @_);
 		if ($r == SMFIS_CONTINUE) { return; }
 
+		if ($type ne 'quit') { &callback('quit'); }
 		print &get_smfis_code_name($r) . "\n";
 		exit($r);
 	}
@@ -765,6 +766,9 @@ sub get_timestamp {
 #-------------------------------------------------------------------------------
 sub save_email_file {
 	my $title = shift;
+	$title =~ s|[\x00-\x1f ]+| |g;
+	$title =~ s|[<>/:"'\\]|_|g;
+
 	my $file  = $SAVE_DIR . &get_timestamp(time, "%04d%02d%02d-%02d%02d%02d") . $title . '.eml';
 	if (1<$PRINT) { &log("Save to $file"); }
 
@@ -772,8 +776,19 @@ sub save_email_file {
 
 	# create link file
 	if ($SAVE_TXT || $INDEX) {
+		
 		my $txt = $file =~ s/\.eml$/.txt/r;
-		link $file, $txt;
+		if ($mail_obj) {
+			my $header = shift . (($body =~ /^(.*?\r?\n\r?\n)/s) ? $1 : '');
+			&fwrite_lines($txt, [
+				$header,
+				$mail_obj->{body},
+				$mail_obj->{html} ? "\r\n\r\n" . ("-" x 80) . "\r\n\r\n" : "",
+				$mail_obj->{html}
+			]);
+		} else {
+			link $file, $txt;
+		}
 	}
 }
 
@@ -893,6 +908,7 @@ sub fwrite_lines {
 		&log("Create index file failed: $file");
 		return;
 	}
+	binmode($fh);
 	foreach(@$lines) {
 		syswrite($fh, $_);
 	}
