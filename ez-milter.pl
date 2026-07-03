@@ -230,7 +230,7 @@ $cb{negotiate} = sub {
 };
 
 $cb{helo} = sub {
-	my $ctx = shift;
+	my $ctx  = shift;
 	#
 	# undef, because multiple message can be sent over the same connection.
 	#
@@ -239,6 +239,7 @@ $cb{helo} = sub {
 		ctx	=> $ctx,	# use by add_header() for user filter
 		DNS	=> $DNS,	# use by get_sender_domain_ip
 		header	=> \%header,
+		c_name	=> shift,	# HELO/EHLO argument is client name
 		DEBUG	=> $DEBUG
 	});
 	$body     = '';
@@ -248,16 +249,15 @@ $cb{helo} = sub {
 	undef @add_header_buf;
 	$out_headers='';
 	$mail_obj = undef;
-	#{
+	# $ctx->{symbols}->{C} = {
         #	daemon_addr => '192.168.0.10',
         #	daemon_name => 'my.example.jp',
         #	v           => 'Postfix 3.10.5',
-        #	j           => 'sender_name.example.jp',
-        #	_           => 'lookup_host_name [client ip]',
+        #	j           => 'local_mta_name.example.jp',
+        #	_           => 'lookup_client_host_name [client ip]'
         #};
 	eval {
 		my $c = $ctx->{symbols}->{C};
-		$arg->{c_name} = $c->{j};
 		if ($c->{_} =~ /^([^\s]*)\s\[(.*)\]/) {
 			$arg->{c_ip}   = $2;
 			$arg->{c_host} = $1;	# lookup name
