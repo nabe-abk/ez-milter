@@ -9,6 +9,15 @@ package user_filter;
 my %USER = map { $_ => 1 } qw(
 	username@example.jp
 );
+
+# SPF_BYPASS applies only to exact matches.
+my %SPF_BYPASS_DOMAIN = map { $_ => 1 } qw(
+	example.com
+);
+my %SPF_BYPASS_IP = map { $_ => 1 } qw(
+	192.168.11.22
+);
+
 #-------------------------------------------------------------------------------
 use constant ACCEPT     =>   0;
 use constant CONTINUE   =>   0;		# same as ACCEPT
@@ -116,6 +125,13 @@ sub check_pre_DATA {
 	my $c_host   = $arg->{c_host};		# lookup hostname
 	my $env_from = $arg->{env_from};
 	my $rcpt_to  = $arg->{rcpt_to};
+
+	if ($env_from =~ /\@(.+)$/ && $SPF_BYPASS_DOMAIN{$1}) {
+		return CONTINUE;
+	}
+	if ($SPF_BYPASS_IP{$c_ip}) {
+		return CONTINUE;
+	}
 
 	if ($arg->{can_check_spf}) {
 		#
