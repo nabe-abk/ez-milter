@@ -6,18 +6,18 @@ use strict;
 #
 package user_filter;
 #-------------------------------------------------------------------------------
-my %USER = map { $_ => 1 } qw(
+my %USER = map {$_=>1} qw(		# exact match
 	username@example.jp
 );
 
-# SPF_BYPASS applies only to exact matches.
-my %SPF_BYPASS_DOMAIN = map { $_ => 1 } qw(
+my $SPF_CHECK_ALL = 1;			# Set to 1 to check SPF all "envelope to".
+my $SPF_SOFTFAIL_REJECT = 0;		# Set to 1 to reject SPF softfail.
+my %SPF_BYPASS_DOMAIN = map {$_=>1} qw(	# exact match
 	example.com
 );
-my %SPF_BYPASS_IP = map { $_ => 1 } qw(
+my %SPF_BYPASS_IP = map {$_=>1} qw(	# exact match
 	192.168.11.22
 );
-
 #-------------------------------------------------------------------------------
 use constant ACCEPT     =>   0;
 use constant CONTINUE   =>   0;		# same as ACCEPT
@@ -126,24 +126,24 @@ sub check_pre_DATA {
 	my $env_from = $arg->{env_from};
 	my $rcpt_to  = $arg->{rcpt_to};
 
-	if ($env_from =~ /\@(.+)$/ && $SPF_BYPASS_DOMAIN{$1}) {
-		return CONTINUE;
-	}
-	if ($SPF_BYPASS_IP{$c_ip}) {
-		return CONTINUE;
-	}
-
-	if ($arg->{can_check_spf}) {
+	if ($arg->{can_check_spf} && ($SPF_CHECK_ALL || $USER{$rcpt_to})) {
 		#
 		# SPF function require Mail::SPF_XS library.
 		#	apt-get install libmail-spf-xs-perl
 		#
 		my $code = $arg->check_spf();			# pass fail softfail none
+		my $sp   = '';
 
-		if ($code eq 'fail' || $code eq 'softfail') {
-			return (REJECT, "SPF $code", '5.7.1', 'SPF fail');
+		if ($code eq 'fail' || $SPF_SOFTFAIL_REJECT && $code eq 'softfail') {
+			if ($env_from =~ /\@(.+)$/ && $SPF_BYPASS_DOMAIN{$1}) {
+				$sp = " ($1 in SPF_BYPASS_DOMAIN)";
+			} elsif ($SPF_BYPASS_IP{$c_ip}) {
+				$sp = " ($c_ip in SPF_BYPASS_IP)";
+			} else {
+				return (REJECT, "SPF $code", '5.7.1', 'SPF fail');
+			}
 		}
-		$arg->add_header('X-SPF-Check', $code);
+		$arg->add_header('X-SPF-Check', $code . $sp);
 	}
 	return CONTINUE;
 }
