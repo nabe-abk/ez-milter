@@ -301,7 +301,7 @@ $cb{header} = sub {
 	$key   =~ tr/A-Z/a-z/;
 
 	if (!exists($header{$key})) {
-		$header{$key} = $val =~ s/[\r\n\t ]+$//r;
+		$header{$key} = ($val =~ s/^\s+//r) =~ s/\s+$//r;
 	}
 
 	return SMFIS_CONTINUE;
@@ -583,7 +583,7 @@ else {
 
 	foreach(@header) {
 		$_ =~ s/\r?\n$//m;
-		&callback('header', split(/:\s*/, $_, 2));
+		&callback('header', split(/: /, $_, 2));
 	}
 	&callback('eoh');
 
